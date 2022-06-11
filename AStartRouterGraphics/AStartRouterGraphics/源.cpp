@@ -134,6 +134,7 @@ void drawSEP(Map& map, HDC hdc, int hdcWid, int hdcHei){
 	}
 }
 
+COLORREF blockColor = 0x0;
 // 绘制地图
 void drawMap(Map& map, HDC hdc, int hdcWid, int hdcHei)
 {
@@ -150,11 +151,12 @@ void drawMap(Map& map, HDC hdc, int hdcWid, int hdcHei)
 				oldBrush = SelectObject(hdc, brush);
 			}
 			else if (ch == BLK_BLOCK){
-				brush = CreateSolidBrush(RGB(0, 0, 0));
+				brush = CreateSolidBrush(blockColor);
 				oldBrush = SelectObject(hdc, brush);
 			}
 			else if (ch > BLK_EMPTY){
-				brush = CreateSolidBrush(RGB(220, 255, 0));
+				char pch = ch - 1;
+				brush = CreateSolidBrush(RGB((220 - min(150, pch * 20)), (255 - min(200, pch * 10)), 0));
 				oldBrush = SelectObject(hdc, brush);
 			}
 			
@@ -166,7 +168,11 @@ void drawMap(Map& map, HDC hdc, int hdcWid, int hdcHei)
 
 			// 绘制地图文字
 			if (isShowText && ch>0){
-				SetTextColor(hdc, 0xeeddaa);
+				COLORREF textColor = 0xeeddaa;
+				if (ch < 8){
+					textColor = 0x443366;
+				}
+				SetTextColor(hdc,textColor);
 				SetBkMode(hdc, TRANSPARENT);
 
 				TCHAR buf[20];
@@ -223,6 +229,8 @@ void drawPath(Step * cur,COLORREF color,HDC hdc,double blkWid,double blkHei,doub
 	}
 }
 
+
+
 // 是否按键按下
 bool isKeyDownEx(int keyCode){
 	return GetAsyncKeyState(keyCode) & 0x08000;
@@ -233,9 +241,43 @@ bool isKeyDown(int keyCode){
 	return isKeyDownEx(VK_CAPITAL) && isKeyDownEx(keyCode);
 }
 
+int boostCount = 0;
 // 是否加速模式
 bool isBoostMode(){
 	return isKeyDown(VK_RETURN);
+}
+
+// 在地图中手动设置方块或移除方块
+void exchangeBlocks(Map& map, int hdcWid, int hdcHei){
+	POINT p;
+	GetCursorPos(&p);
+
+	int px = p.x / (hdcWid / map.wid);
+	int py = p.y / (hdcHei / map.hei);
+
+	if (px < 0 || py < 0 || px >= map.wid || py >= map.hei){
+		return;
+	}
+
+	if (px == map.beginX && py == map.beginY){
+		return;
+	}
+
+	if (px == map.endX && py == map.endY){
+		return;
+	}
+
+	if (*mapAt(map, px, py)>0){
+		return;
+	}
+
+	if (isKeyDown('E') || isKeyDown('e')){
+		*mapAt(map, px, py) = BLK_EMPTY;
+	}
+	if (isKeyDown('R') || isKeyDown('r')){
+		*mapAt(map, px, py) = BLK_BLOCK;
+	}
+
 }
 
 int main(int argc, char * argv[]){
@@ -299,15 +341,17 @@ int main(int argc, char * argv[]){
 	setbkmode(TRANSPARENT);
 	settextcolor(0x0055ff);
 	setfillcolor(0xffffff);
-	fillrectangle(winWid / 8, winHei / 2-50, winWid * 7/8, winHei / 2 + 5 * 24+50);
+	fillrectangle(winWid / 8, winHei / 2-50, winWid * 7/8, winHei / 2 + 7 * 24+50);
 	outtextxy(winWid / 5, winHei / 2 + 0 * 24, TEXT("欢迎来到寻路算法演示程序"));
 	outtextxy(winWid / 5, winHei / 2 + 1 * 24, TEXT("请按任意键继续"));
 	outtextxy(winWid / 5, winHei / 2 + 3 * 24, TEXT("Caps+Enter/Return/回车键:加速寻路过程"));
 	outtextxy(winWid / 5, winHei / 2 + 4 * 24, TEXT("Caps+Space/空格键：退出寻路过程"));
 	outtextxy(winWid / 5, winHei / 2 + 5 * 24, TEXT("Caps+T/t/T键：显示隐藏文字"));
+	outtextxy(winWid / 5, winHei / 2 + 6 * 24, TEXT("Caps+E/e/E键：鼠标位置移除方块"));
+	outtextxy(winWid / 5, winHei / 2 + 7 * 24, TEXT("Caps+R/r/R键：鼠标位置添加方块"));
 
 	FlushBatchDraw();
-	Sleep(2000);
+	Sleep(4000);
 
 	settextstyle(12, 8, NULL);
 	settextcolor(0x0);
@@ -315,6 +359,7 @@ int main(int argc, char * argv[]){
 	
 	while (true)
 	{
+		blockColor = RGB((rand() % 100), (rand() % 100), (rand() % 100));
 
 		int stat = IDCANCEL;
 		// 初始化随机图
@@ -476,10 +521,11 @@ int main(int argc, char * argv[]){
 					if (aStarMode){
 						// 成功条数相关性
 						double perDis = *mapAt(map, nst->x, nst->y)*1.0 / (succ.size() + 1);
+						perDis = pow(perDis, 2.0);
 						nst->dis =  distance(nst->x, nst->y, map.endX, map.endY) + perDis;
 						// 已走过长度相关，上一步距离相关
 						//if (hisCount > minDis){
-							nst->dis =nst->dis*0.6+ hisCount*0.2+cur->dis*0.2;
+							nst->dis =nst->dis*0.8+ hisCount*0.1+cur->dis*0.1;
 						//}
 					}
 					else{ // 平凡寻路，无距离概念
@@ -501,21 +547,26 @@ int main(int argc, char * argv[]){
 					// 已被走过+1
 					*mapAt(map, nst->x, nst->y) = min(nchv+1,128);
 					
-					// 绘制路由路径
 
-					drawMap(map, hdc, winWid, winHei);
+					if (boostCount % (boostCount/10+1) == 0){
+						// 绘制路由路径
 
-					drawPath(nst, RGB(255, 0, 255), hdc, blkWid, blkHei);
-					
+						drawMap(map, hdc, winWid, winHei);
 
-					drawSEP(map, hdc, winWid, winHei);
+						drawPath(nst, RGB(255, 0, 255), hdc, blkWid, blkHei);
 
-					FlushBatchDraw();
+
+						drawSEP(map, hdc, winWid, winHei);
+
+						FlushBatchDraw();
+					}
 					//MessageBox(hwnd, TEXT("Next"), TEXT("下一步确认"), MB_OK);
 					if (isBoostMode()){
 						//Sleep(1);
+						boostCount++;
 					}
 					else{
+						boostCount = 0;
 						Sleep(max(1, min(200 - max(cols, rows),35)));
 					}
 
@@ -530,7 +581,7 @@ int main(int argc, char * argv[]){
 				// 如果下一步已经都被走过，则说明绕行概率很高，根据走过的次数平均值，进行增大距离权重，使得绕行
 				if (nextRoutedCount == nexts.size()){
 					for (vector<Step*>::iterator it = nexts.begin(); it != nexts.end(); it++){
-						(*it)->dis *= 1.0 + max(0.01*(sumRoutedWeights / nextRoutedCount), 0.5);
+						(*it)->dis *= 1.0 + min(0.1*(sumRoutedWeights / nextRoutedCount), 9.0);
 					}
 				}
 			}
@@ -559,7 +610,9 @@ int main(int argc, char * argv[]){
 			if (isKeyDown('T') || isKeyDown('t')){
 				isShowText = !isShowText;
 			}
-			
+			if (isKeyDown('E') || isKeyDown('e') || isKeyDown('R') || isKeyDown('r')){
+				exchangeBlocks(map,winWid,winHei);
+			}
 		}
 
 		drawMap(map, hdc, winWid, winHei);
